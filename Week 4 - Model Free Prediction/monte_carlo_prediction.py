@@ -1,125 +1,92 @@
-
-# coding: utf-8
-
-# In[1]:
-
-
-import gym 
 import numpy as np
-import sys
-import matplotlib
-
-if "../" not in sys.path:
-    sys.path.append("../") 
-    
-from lib.envs.blackjack import BlackjackEnv
-from lib import plotting
-
+import matplotlib.pyplot as plt
+import random
 from collections import defaultdict
-matplotlib.style.use('ggplot')
 
+class BlackjackEnv:
+    def __init__(self):
+        self.action_space = [0, 1]  # 0: Stick, 1: Hit
+        self.state = None
+        self.reset()
 
-# In[2]:
+    def reset(self):
+        """Reset the environment to an initial state."""
+        player_card = random.randint(1, 10)
+        dealer_card = random.randint(1, 10)
+        usable_ace = random.choice([True, False])  # Randomly assign usable ace
+        self.state = (player_card, dealer_card, usable_ace)
+        return self.state
 
+    def step(self, action):
+        """Perform an action in the environment."""
+        player_card, dealer_card, usable_ace = self.state
+        
+        if action == 1:  # Hit
+            player_card += random.randint(1, 10)
+            if player_card > 21:  # Player bust
+                return None, -1, True, {}
+        else:  # Stick
+            while dealer_card < 17:  # Dealer hits until reaching 17 or higher
+                dealer_card += random.randint(1, 10)
+            if dealer_card > 21 or player_card > dealer_card:
+                return self.state, 1, True, {}
+            elif player_card < dealer_card:
+                return self.state, -1, True, {}
+            else:
+                return self.state, 0, True, {}
+        
+        self.state = (player_card, dealer_card, usable_ace)
+        return self.state, 0, False, {}
 
-env = BlackjackEnv()
+    def render(self):
+        """Optional method to render the environment."""
+        print(f"Player: {self.state[0]}, Dealer: {self.state[1]}, Usable Ace: {self.state[2]}")
 
-
-# In[3]:
-
+def sample_policy(state):
+    """Sample policy for blackjack (randomly choose an action)."""
+    return np.random.choice([0, 1])  # Randomly choose to stick or hit
 
 def mc_prediction(policy, env, num_episodes, discount_factor=1.0):
-    """
-    Monte Carlo First-Visit prediction algorithm. Calculates the value function
-    for a given policy using sampling.
-    
-    Args:
-        policy: A function that maps an observation to action probabilities.
-        env: OpenAI gym environment.
-        num_episodes: Number of episodes to sample.
-        discount_factor: Gamma discount factor.
-    
-    Returns:
-        A dictionary that maps from state -> value.
-        The state is a tuple and the value is a float.
-    """
-    
-    # store the number of times each state is visited 
     returns_num = defaultdict(float)
-    
-    # value function to be returned
-    V = defaultdict(float)    
-    
-    # termination condition
+    V = defaultdict(float)
+
     for episode in range(num_episodes):
-        
-        # store the eligibility trace corresponding to each state for each episode
-        eligibility_traces = defaultdict(float)
-        
-        # store the reward corresponding to each state for each episode
         episode_rewards = defaultdict(float)
-        
-        terminated = False
         state = env.reset()
-        
-        # termination condition
+
+        if state is None:
+            print(f"Episode {episode} reset returned None, skipping...")
+            continue
+
+        terminated = False
         while not terminated:
-            
-            # update the eligibility trace for the states already visited in the episode 
-            for _state in eligibility_traces:
-                
-                eligibility_traces[_state] *= discount_factor
-            
-            # add a new state to the dictionary if it's not been visited before
-            if state not in eligibility_traces:
-                
-                eligibility_traces[state] = 1.0
-                returns_num[state] += 1
-                
-            # get the action following the policy
-            action = np.argmax(policy(state))
-            
-            # perform the action in the environment
+            action = policy(state)
             next_state, reward, terminated, _ = env.step(action)
-            
-            # update the reward for each state
-            for _state in eligibility_traces:
-                
-                episode_rewards[_state] += eligibility_traces[_state] * reward
-            
-            # update the current state
+
+            if next_state is None:
+                print(f"Episode {episode} step returned None, terminating...")
+                break
+
+            episode_rewards[state] += reward
             state = next_state
-        
-        # update the value function using incremental mean method
+
         for state in episode_rewards:
-            
-            V[state] += (episode_rewards[state] - V[state]) / returns_num[state] 
-        
+            returns_num[state] += 1
+            V[state] += (episode_rewards[state] - V[state]) / returns_num[state]
+
     return V
 
+def plot_value_function(V, title="Value Function"):
+    plt.figure(figsize=(10, 5))
+    plt.title(title)
+    plt.xlabel('State')
+    plt.ylabel('Value')
+    plt.bar(range(len(V)), list(V.values()), align='center')
+    plt.xticks(range(len(V)), [str(k) for k in V.keys()], rotation=45)
+    plt.show()
 
-# In[4]:
-
-
-def sample_policy(observation):
-    """
-    A policy that sticks if the player score is > 20 and hits otherwise.
-    """
-    
-    player_score, dealer_score, usable_ace = observation
-    return np.array([1.0, 0.0]) if player_score >= 20 else np.array([0.0, 1.0])
-
-
-# In[5]:
-
-
-V_10k = mc_prediction(sample_policy, env, num_episodes=10000)
-plotting.plot_value_function(V_10k, title="10,000 Steps")
-
-
-# In[18]:
-
-
-V_500k = mc_prediction(sample_policy, env, num_episodes=500000)
-plotting.plot_value_function(V_500k, title="500,000 Steps")
-
+if __name__ == "__main__":
+    env = BlackjackEnv()
+    num_episodes = 10000
+    V_10k = mc_prediction(sample_policy, env, num_episodes=num_episodes)
+    plot_value_function(V_10k, title="Value Function after 10,000 Episodes")
